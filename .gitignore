@@ -1,5 +1,8 @@
-coverage
-.vagrant
-Vagrantfile
-pkg
+.bundle/
 .idea/
+.vagrant
+coverage
+pkg
+vendor/
+Vagrantfile
+

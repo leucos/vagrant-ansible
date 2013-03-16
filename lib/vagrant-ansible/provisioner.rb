@@ -12,6 +12,8 @@ module Vagrant
         attr_accessor :inventory_file
         attr_accessor :ask_sudo_pass
         attr_accessor :sudo
+        attr_accessor :debug
+        attr_accessor :extra_vars
 
         def initialize
           @options = []
@@ -47,21 +49,18 @@ module Vagrant
 
       # This methods yield the path to a temporally created inventory
       # file.
-      def with_inventory_file(ssh)
+      def with_inventory_file
         if not config.inventory_file.nil?
           yield config.inventory_file
         else
           begin
-            forward = env[:vm].config.vm.forwarded_ports.select do |x|
-              x[:guestport] == ssh.guest_port
-            end.first[:hostport]
             if not config.hosts.kind_of?(Array)
               config.hosts = [config.hosts]
             end
-            file = Tempfile.new('inventory')
+            file = Tempfile.new('inventory-')
             config.hosts.each do |host|
               file.write("[#{host}]\n")
-              file.write("#{ssh.host}:#{forward}\n")
+              file.write("#@hostname ansible_ssh_host=#{@ssh.host} ansible_ssh_port=#{@forward}\n")
               file.write("\n")
             end
             file.fsync
@@ -74,20 +73,30 @@ module Vagrant
       end
 
       def provision!
-        ssh = env[:vm].config.ssh
+        @ssh = env[:vm].config.ssh
+        @hostname = env[:vm].config.vm.host_name || @ssh.host
+        @forward = env[:vm].config.vm.forwarded_ports.select do |x|
+          x[:guestport] == @ssh.guest_port
+        end.first[:hostport]
 
-        with_inventory_file(ssh) do |inventory_file|
-          options = %W[--user=#{ssh.username}
+        with_inventory_file do |inventory_file|
+          options = %W[--user=#{@ssh.username}
                        --inventory-file=#{inventory_file}
-                       --private-key=#{env[:vm].env.default_private_key_path}]
+                       --private-key=#{env[:vm].env.default_private_key_path}
+                       --extra-vars="ansible_ssh_host=#{@ssh.host} ansible_ssh_port=#{@forward} #{config.extra_vars}"
+                       --limit=#{@hostname}
+                      ]
 
           options << "--ask-sudo-pass" if config.ask_sudo_pass
           options << "--sudo" if config.sudo
+          options << "-vvv" if config.debug
           options = options + config.options unless config.options.empty?
 
           cmd = (%w(ansible-playbook) << options << config.playbook).flatten
 
-          safe_exec *cmd
+          warn cmd.join(' ') if config.debug
+
+          safe_exec cmd.join(' ')
         end
       end
     end
